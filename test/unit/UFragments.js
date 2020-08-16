@@ -13,7 +13,7 @@ function toUFrgDenomination (x) {
   return new BigNumber(x).mul(10 ** DECIMALS);
 }
 const DECIMALS = 9;
-const INTIAL_SUPPLY = toUFrgDenomination(50 * 10 ** 6);
+const INTIAL_SUPPLY = toUFrgDenomination(380 * 10 ** 6);
 const transferAmount = toUFrgDenomination(10);
 const unitTokenAmount = toUFrgDenomination(1);
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -45,6 +45,7 @@ contract('UFragments:Initialization', function (accounts) {
   before('setup UFragments contract', setupContracts);
 
   it('should transfer 50M uFragments to the deployer', async function () {
+    console.log(accounts);
     (await uFragments.balanceOf.call(deployer)).should.be.bignumber.eq(INTIAL_SUPPLY);
     const log = r.logs[0];
     expect(log).to.exist;
@@ -63,8 +64,8 @@ contract('UFragments:Initialization', function (accounts) {
   });
 
   it('should set detailed ERC20 parameters', async function () {
-    expect(await uFragments.name.call()).to.eq('Ampleforth');
-    expect(await uFragments.symbol.call()).to.eq('AMPL');
+    expect(await uFragments.name.call()).to.eq('eLINK');
+    expect(await uFragments.symbol.call()).to.eq('ELINK');
     (await uFragments.decimals.call()).should.be.bignumber.eq(DECIMALS);
   });
 
@@ -73,9 +74,9 @@ contract('UFragments:Initialization', function (accounts) {
     decimals.should.be.bignumber.eq(DECIMALS);
   });
 
-  it('should have AMPL symbol', async function () {
+  it('should have ELINK symbol', async function () {
     const symbol = await uFragments.symbol.call();
-    symbol.should.be.eq('AMPL');
+    symbol.should.be.eq('ELINK');
   });
 });
 
