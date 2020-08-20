@@ -39,6 +39,8 @@ contract UFragments is ERC20Detailed, Ownable {
     using SafeMathInt for int256;
 
     event LogRebase(uint256 indexed epoch, uint256 totalSupply);
+    event LogRebasePaused(bool paused);
+    event LogTokenPaused(bool paused);
     event LogMonetaryPolicyUpdated(address monetaryPolicy);
 
     // Used for authentication
@@ -49,8 +51,19 @@ contract UFragments is ERC20Detailed, Ownable {
         _;
     }
 
-    bool private rebasePausedDeprecated;
-    bool private tokenPausedDeprecated;
+    // Precautionary emergency controls.
+    bool public rebasePaused;
+    bool public tokenPaused;
+
+    modifier whenRebaseNotPaused() {
+        require(!rebasePaused);
+        _;
+    }
+
+    modifier whenTokenNotPaused() {
+        require(!tokenPaused);
+        _;
+    }
 
     modifier validRecipient(address to) {
         require(to != address(0x0));
@@ -64,10 +77,11 @@ contract UFragments is ERC20Detailed, Ownable {
 
     // TOTAL_GONS is a multiple of INITIAL_FRAGMENTS_SUPPLY so that _gonsPerFragment is an integer.
     // Use the highest value that fits in a uint256 for max granularity.
-    uint256 private constant TOTAL_GONS = MAX_UINT256 - (MAX_UINT256 % INITIAL_FRAGMENTS_SUPPLY);
+    uint256 private constant TOTAL_GONS = MAX_UINT256 -
+        (MAX_UINT256 % INITIAL_FRAGMENTS_SUPPLY);
 
     // MAX_SUPPLY = maximum integer < (sqrt(4*TOTAL_GONS + 1) - 1) / 2
-    uint256 private constant MAX_SUPPLY = ~uint128(0);  // (2^128) - 1
+    uint256 private constant MAX_SUPPLY = ~uint128(0); // (2^128) - 1
 
     uint256 private _totalSupply;
     uint256 private _gonsPerFragment;
@@ -75,17 +89,32 @@ contract UFragments is ERC20Detailed, Ownable {
 
     // This is denominated in Fragments, because the gons-fragments conversion might change before
     // it's fully paid.
-    mapping (address => mapping (address => uint256)) private _allowedFragments;
+    mapping(address => mapping(address => uint256)) private _allowedFragments;
 
     /**
      * @param monetaryPolicy_ The address of the monetary policy contract to use for authentication.
      */
-    function setMonetaryPolicy(address monetaryPolicy_)
-        external
-        onlyOwner
-    {
+    function setMonetaryPolicy(address monetaryPolicy_) external onlyOwner {
         monetaryPolicy = monetaryPolicy_;
         emit LogMonetaryPolicyUpdated(monetaryPolicy_);
+    }
+
+    /**
+     * @dev Pauses or unpauses the execution of rebase operations.
+     * @param paused Pauses rebase operations if this is true.
+     */
+    function setRebasePaused(bool paused) external onlyOwner {
+        rebasePaused = paused;
+        emit LogRebasePaused(paused);
+    }
+
+    /**
+     * @dev Pauses or unpauses execution of ERC-20 transactions.
+     * @param paused Pauses ERC-20 transactions if this is true.
+     */
+    function setTokenPaused(bool paused) external onlyOwner {
+        tokenPaused = paused;
+        emit LogTokenPaused(paused);
     }
 
     /**
@@ -96,6 +125,7 @@ contract UFragments is ERC20Detailed, Ownable {
     function rebase(uint256 epoch, int256 supplyDelta)
         external
         onlyMonetaryPolicy
+        whenRebaseNotPaused
         returns (uint256)
     {
         if (supplyDelta == 0) {
@@ -130,15 +160,12 @@ contract UFragments is ERC20Detailed, Ownable {
         return _totalSupply;
     }
 
-    function initialize(address owner_)
-        public
-        initializer
-    {
+    function initialize(address owner_) public initializer {
         ERC20Detailed.initialize("eLINK", "ELINK", uint8(DECIMALS));
         Ownable.initialize(owner_);
 
-        rebasePausedDeprecated = false;
-        tokenPausedDeprecated = false;
+        rebasePaused = false;
+        tokenPaused = false;
 
         _totalSupply = INITIAL_FRAGMENTS_SUPPLY;
         _gonBalances[owner_] = TOTAL_GONS;
@@ -150,11 +177,7 @@ contract UFragments is ERC20Detailed, Ownable {
     /**
      * @return The total number of fragments.
      */
-    function totalSupply()
-        public
-        view
-        returns (uint256)
-    {
+    function totalSupply() public view returns (uint256) {
         return _totalSupply;
     }
 
@@ -162,11 +185,7 @@ contract UFragments is ERC20Detailed, Ownable {
      * @param who The address to query.
      * @return The balance of the specified address.
      */
-    function balanceOf(address who)
-        public
-        view
-        returns (uint256)
-    {
+    function balanceOf(address who) public view returns (uint256) {
         return _gonBalances[who].div(_gonsPerFragment);
     }
 
@@ -179,6 +198,7 @@ contract UFragments is ERC20Detailed, Ownable {
     function transfer(address to, uint256 value)
         public
         validRecipient(to)
+        whenTokenNotPaused
         returns (bool)
     {
         uint256 gonValue = value.mul(_gonsPerFragment);
@@ -208,12 +228,14 @@ contract UFragments is ERC20Detailed, Ownable {
      * @param to The address you want to transfer to.
      * @param value The amount of tokens to be transferred.
      */
-    function transferFrom(address from, address to, uint256 value)
-        public
-        validRecipient(to)
-        returns (bool)
-    {
-        _allowedFragments[from][msg.sender] = _allowedFragments[from][msg.sender].sub(value);
+    function transferFrom(
+        address from,
+        address to,
+        uint256 value
+    ) public validRecipient(to) whenTokenNotPaused returns (bool) {
+        _allowedFragments[from][msg.sender] = _allowedFragments[from][msg
+            .sender]
+            .sub(value);
 
         uint256 gonValue = value.mul(_gonsPerFragment);
         _gonBalances[from] = _gonBalances[from].sub(gonValue);
@@ -236,6 +258,7 @@ contract UFragments is ERC20Detailed, Ownable {
      */
     function approve(address spender, uint256 value)
         public
+        whenTokenNotPaused
         returns (bool)
     {
         _allowedFragments[msg.sender][spender] = value;
@@ -252,11 +275,17 @@ contract UFragments is ERC20Detailed, Ownable {
      */
     function increaseAllowance(address spender, uint256 addedValue)
         public
+        whenTokenNotPaused
         returns (bool)
     {
-        _allowedFragments[msg.sender][spender] =
-            _allowedFragments[msg.sender][spender].add(addedValue);
-        emit Approval(msg.sender, spender, _allowedFragments[msg.sender][spender]);
+        _allowedFragments[msg.sender][spender] = _allowedFragments[msg
+            .sender][spender]
+            .add(addedValue);
+        emit Approval(
+            msg.sender,
+            spender,
+            _allowedFragments[msg.sender][spender]
+        );
         return true;
     }
 
@@ -268,15 +297,22 @@ contract UFragments is ERC20Detailed, Ownable {
      */
     function decreaseAllowance(address spender, uint256 subtractedValue)
         public
+        whenTokenNotPaused
         returns (bool)
     {
         uint256 oldValue = _allowedFragments[msg.sender][spender];
         if (subtractedValue >= oldValue) {
             _allowedFragments[msg.sender][spender] = 0;
         } else {
-            _allowedFragments[msg.sender][spender] = oldValue.sub(subtractedValue);
+            _allowedFragments[msg.sender][spender] = oldValue.sub(
+                subtractedValue
+            );
         }
-        emit Approval(msg.sender, spender, _allowedFragments[msg.sender][spender]);
+        emit Approval(
+            msg.sender,
+            spender,
+            _allowedFragments[msg.sender][spender]
+        );
         return true;
     }
 }

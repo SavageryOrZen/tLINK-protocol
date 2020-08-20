@@ -9,7 +9,7 @@ import "./UFragments.sol";
 
 
 interface IOracle {
-    function getData() external returns (uint256, bool);
+    function getData() external returns (uint256, address, bool);
 }
 
 
@@ -30,22 +30,18 @@ contract UFragmentsPolicy is Ownable {
     event LogRebase(
         uint256 indexed epoch,
         uint256 exchangeRate,
-        uint256 cpi,
         int256 requestedSupplyAdjustment,
         uint256 timestampSec
     );
 
     UFragments public uFrags;
 
-    // Provides the current CPI, as an 18 decimal fixed point number.
-    IOracle public cpiOracle;
-
     // Market oracle provides the token/USD exchange rate as an 18 decimal fixed point number.
     // (eg) An oracle value of 1.5e18 it would mean 1 Ample is trading for $1.50.
     IOracle public marketOracle;
 
-    // CPI value at the time of launch, as an 18 decimal fixed point number.
-    uint256 private baseCpi;
+    // The target asset contract address.
+    address public targetAsset;
 
     // If the current exchange rate is within this fractional distance from the target, no supply
     // update is performed. Fixed point number--same format as the rate.
@@ -78,9 +74,12 @@ contract UFragmentsPolicy is Ownable {
 
     // Due to the expression in computeSupplyDelta(), MAX_RATE * MAX_SUPPLY must fit into an int256.
     // Both are 18 decimals fixed point numbers.
-    uint256 private constant MAX_RATE = 10**6 * 10**DECIMALS;
+    uint256 private constant MAX_RATE = 2 * 10**DECIMALS;
     // MAX_SUPPLY = MAX_INT256 / MAX_RATE
     uint256 private constant MAX_SUPPLY = ~(uint256(1) << 255) / MAX_RATE;
+
+    // target rate 1
+    uint256 private constant TARGET_RATE = 1 * 10**DECIMALS;
 
     // This module orchestrates the rebase execution and downstream notification.
     address public orchestrator;
@@ -95,7 +94,7 @@ contract UFragmentsPolicy is Ownable {
      *
      * @dev The supply adjustment equals (_totalSupply * DeviationFromTargetRate) / rebaseLag
      *      Where DeviationFromTargetRate is (MarketOracleRate - targetRate) / targetRate
-     *      and targetRate is CpiOracleRate / baseCpi
+     *      and targetRate is 1
      */
     function rebase() external onlyOrchestrator {
         require(inRebaseWindow());
@@ -109,17 +108,14 @@ contract UFragmentsPolicy is Ownable {
 
         epoch = epoch.add(1);
 
-        uint256 cpi;
-        bool cpiValid;
-        (cpi, cpiValid) = cpiOracle.getData();
-        require(cpiValid);
-
-        uint256 targetRate = cpi.mul(10 ** DECIMALS).div(baseCpi);
+        uint256 targetRate = TARGET_RATE;
 
         uint256 exchangeRate;
         bool rateValid;
-        (exchangeRate, rateValid) = marketOracle.getData();
+        address asset;
+        (exchangeRate, asset, rateValid) = marketOracle.getData();
         require(rateValid);
+        require(asset == targetAsset);
 
         if (exchangeRate > MAX_RATE) {
             exchangeRate = MAX_RATE;
@@ -136,18 +132,7 @@ contract UFragmentsPolicy is Ownable {
 
         uint256 supplyAfterRebase = uFrags.rebase(epoch, supplyDelta);
         assert(supplyAfterRebase <= MAX_SUPPLY);
-        emit LogRebase(epoch, exchangeRate, cpi, supplyDelta, now);
-    }
-
-    /**
-     * @notice Sets the reference to the CPI oracle.
-     * @param cpiOracle_ The address of the cpi oracle contract.
-     */
-    function setCpiOracle(IOracle cpiOracle_)
-        external
-        onlyOwner
-    {
-        cpiOracle = cpiOracle_;
+        emit LogRebase(epoch, exchangeRate, supplyDelta, now);
     }
 
     /**
@@ -229,11 +214,23 @@ contract UFragmentsPolicy is Ownable {
     }
 
     /**
+     * @notice Sets the asset contract address to rebase.
+     * @param targetAsset_ Address of the asset token.
+     */
+    function setTargetAsset(
+        address targetAsset_)
+        external
+        onlyOwner
+    {
+        targetAsset = targetAsset_;
+    }
+
+    /**
      * @dev ZOS upgradable contract initialization method.
      *      It is called at the time of contract creation to invoke parent class initializers and
      *      initialize the contract's state variables.
      */
-    function initialize(address owner_, UFragments uFrags_, uint256 baseCpi_)
+    function initialize(address owner_, UFragments uFrags_)
         public
         initializer
     {
@@ -242,15 +239,15 @@ contract UFragmentsPolicy is Ownable {
         // deviationThreshold = 0.05e18 = 5e16
         deviationThreshold = 5 * 10 ** (DECIMALS-2);
 
-        rebaseLag = 30;
+        // rebaseLag = 30;
+        rebaseLag = 10;
         minRebaseTimeIntervalSec = 1 days;
-        rebaseWindowOffsetSec = 72000;  // 8PM UTC
-        rebaseWindowLengthSec = 15 minutes;
+        rebaseWindowOffsetSec = 54000;  // 3PM UTC
+        rebaseWindowLengthSec = 30 minutes;
         lastRebaseTimestampSec = 0;
         epoch = 0;
 
         uFrags = uFrags_;
-        baseCpi = baseCpi_;
     }
 
     /**

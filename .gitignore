@@ -72,3 +72,6 @@ scDebugLog
 coverage.json
 coverage/
 coverageEnv/
+
+.env
+migrations/*.js
