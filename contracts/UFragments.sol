@@ -73,7 +73,7 @@ contract UFragments is ERC20Detailed, Ownable {
 
     uint256 private constant DECIMALS = 9;
     uint256 private constant MAX_UINT256 = ~uint256(0);
-    uint256 private constant INITIAL_FRAGMENTS_SUPPLY = 35 * 10**6 * 10**DECIMALS;
+    uint256 private constant INITIAL_FRAGMENTS_SUPPLY = 35 * 10**3 * 10**DECIMALS;
 
     // TOTAL_GONS is a multiple of INITIAL_FRAGMENTS_SUPPLY so that _gonsPerFragment is an integer.
     // Use the highest value that fits in a uint256 for max granularity.
@@ -161,7 +161,7 @@ contract UFragments is ERC20Detailed, Ownable {
     }
 
     function initialize(address owner_) public initializer {
-        ERC20Detailed.initialize("eLINK", "ELINK", uint8(DECIMALS));
+        ERC20Detailed.initialize("LinkStepper", "TLINK", uint8(DECIMALS));
         Ownable.initialize(owner_);
 
         rebasePaused = false;
